@@ -1,0 +1,106 @@
+package com.andrerinas.openheadunit.cluster
+
+import com.andrerinas.openheadunit.aap.protocol.proto.Control
+import com.andrerinas.openheadunit.aap.protocol.proto.Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType
+import com.andrerinas.openheadunit.aap.protocol.proto.Media
+import com.google.protobuf.CodedInputStream
+import com.google.protobuf.WireFormat
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ClusterMapTest {
+    private val fingerprint = ClusterLayout.DILINK51_FINGERPRINT
+
+    @Test fun `DiLink 5_1 map windows get streams shaped like the window`() {
+        val full = ClusterLayout.plan(1920, 720, ClusterLayout.Theme.MAP, fingerprint)!!
+        assertEquals(ClusterLayout.Plan(0, 144, 1920, 480, true), full)
+        val fullStream = ClusterStreamProfile.forViewport(full.width, full.height)!!
+        assertEquals(VideoCodecResolutionType._1920x1080, fullStream.resolution)
+        assertEquals(0, fullStream.marginWidth)
+        assertEquals(600, fullStream.marginHeight)
+        assertEquals(300, fullStream.contentTop)
+
+        val side = ClusterLayout.plan(1920, 720, ClusterLayout.Theme.SCENARIO, fingerprint)!!
+        assertEquals(ClusterLayout.Plan(1320, 0, 600, 720, false), side)
+        val sideStream = ClusterStreamProfile.forViewport(side.width, side.height)!!
+        assertEquals(VideoCodecResolutionType._1280x720, sideStream.resolution)
+        assertEquals(680, sideStream.marginWidth)
+        assertEquals(0, sideStream.marginHeight)
+        assertEquals(340, sideStream.contentLeft)
+    }
+
+    @Test fun `other panels fit the smallest codec size or scale down`() {
+        val dilink5 = ClusterStreamProfile.forViewport(1920, 720)!!
+        assertEquals(VideoCodecResolutionType._1920x1080, dilink5.resolution)
+        assertEquals(360, dilink5.marginHeight)
+        val small = ClusterStreamProfile.forViewport(800, 480)!!
+        assertEquals(VideoCodecResolutionType._800x480, small.resolution)
+        assertEquals(0, small.marginWidth + small.marginHeight)
+        val large = ClusterStreamProfile.forViewport(2560, 960)!!
+        assertEquals(1920, large.contentWidth)
+        assertEquals(720, large.contentHeight)
+        assertNull(ClusterStreamProfile.forViewport(0, 720))
+    }
+
+    @Test fun `display selection never swaps the side layer for the full one`() {
+        val names = listOf("ivi", ClusterLayout.FULL, ClusterLayout.SIDE)
+        assertEquals(ClusterLayout.FULL, ClusterLayout.displayName(names, fingerprint, ClusterLayout.Theme.MAP))
+        assertEquals(ClusterLayout.SIDE, ClusterLayout.displayName(names, fingerprint, ClusterLayout.Theme.SIMPLE))
+        assertNull(ClusterLayout.displayName(listOf(ClusterLayout.FULL), fingerprint, ClusterLayout.Theme.SCENARIO))
+        // DiLink 5.0 and unmeasured firmware keep DiPlay's original order, without a viewport.
+        assertEquals(ClusterLayout.FULL, ClusterLayout.displayName(names, "other", ClusterLayout.Theme.SCENARIO))
+        assertNull(ClusterLayout.plan(1920, 720, ClusterLayout.Theme.MAP, "other"))
+        assertNull(ClusterLayout.plan(1280, 480, ClusterLayout.Theme.MAP, fingerprint))
+        assertEquals(ClusterLayout.Theme.SCENARIO, ClusterLayout.theme(7))
+    }
+
+    @Test fun `the cluster sink carries display id 1 and the cluster display type`() {
+        val sink = Control.Service.MediaSinkService.newBuilder()
+            .setAvailableType(Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP)
+            .setUnknownFields(ClusterSinkFields.cluster())
+            .build()
+        val fields = mutableMapOf<Int, Long>()
+        val input = CodedInputStream.newInstance(sink.toByteArray())
+        while (!input.isAtEnd) {
+            val tag = input.readTag()
+            if (WireFormat.getTagWireType(tag) == WireFormat.WIRETYPE_VARINT) fields[WireFormat.getTagFieldNumber(tag)] = input.readInt64()
+            else input.skipField(tag)
+        }
+        assertEquals(1L, fields[6])
+        assertEquals(1L, fields[7])
+        assertEquals(Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP_VALUE.toLong(), fields[1])
+    }
+
+    @Test fun `parameter sets and keyframes are recognised in an access unit`() {
+        val sps = byteArrayOf(0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f)
+        val pps = byteArrayOf(0, 0, 0, 1, 0x68, 0xce.toByte(), 0x3c, 0x80.toByte())
+        val idr = byteArrayOf(0, 0, 1, 0x65, 0x88.toByte(), 0x84.toByte())
+        val slice = byteArrayOf(0, 0, 0, 1, 0x41, 0x9a.toByte())
+
+        val config = AvcNal.scan(sps + pps)
+        assertTrue(config.hasSps && config.hasPps && config.onlyParameterSets)
+        val key = AvcNal.scan(sps + pps + idr)
+        assertTrue(key.hasIdr)
+        assertFalse(key.onlyParameterSets)
+        val delta = AvcNal.scan(slice)
+        assertFalse(delta.hasIdr)
+        assertFalse(delta.onlyParameterSets)
+        assertEquals((sps + pps).toList(), AvcNal.parameterSets(sps + pps + idr).toList())
+    }
+
+    @Test fun `the turn card stays inside the map window it belongs to`() {
+        val side = ClusterLayout.Plan(1320, 0, 600, 720, false)
+        val sideCard = ClusterTurnCardPlacement.card(1920, 720, side)!!
+        assertTrue(sideCard.left >= side.left && sideCard.left + sideCard.width <= side.left + side.width)
+        val full = ClusterLayout.Plan(0, 144, 1920, 480, true)
+        val fullCard = ClusterTurnCardPlacement.card(1920, 720, full)!!
+        assertTrue(fullCard.top >= full.top && fullCard.top + fullCard.height <= full.top + full.height)
+        assertTrue("clear of the left readouts", fullCard.left >= 460)
+        val panel = ClusterTurnCardPlacement.card(1920, 720, null)!!
+        assertTrue(panel.left + panel.width <= 1920 && panel.top >= 0)
+        assertNull(ClusterTurnCardPlacement.card(0, 720, null))
+    }
+}

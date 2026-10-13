@@ -17,6 +17,8 @@ object Channel {
     const val ID_NOTI = 11
     const val ID_PHONE = 12
     const val ID_WIFI = 13
+    /** Second video sink, declared only when the dashboard map is on (see ClusterMapStream). */
+    const val ID_CLUSTER = 14
 
     fun name(channel: Int): String {
         when (channel) {
@@ -33,6 +35,7 @@ object Channel {
             ID_NAV -> return "NAVIGATION_DIRECTIONS"
             ID_NOTI -> return "NOTIFICATION"
             ID_PHONE -> return "PHONE_STATUS"
+            ID_CLUSTER -> return "CLUSTER_VIDEO"
         }
         return "UNK"
     }

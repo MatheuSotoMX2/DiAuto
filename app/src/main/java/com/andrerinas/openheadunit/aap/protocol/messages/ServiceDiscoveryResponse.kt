@@ -121,6 +121,29 @@ class ServiceDiscoveryResponse(private val context: Context)
 
             services.add(video)
 
+            // The instrument-cluster display, only with the dashboard map on and a BYD cluster
+            // projection display present. The phone's navigation app draws the map for it.
+            com.andrerinas.openheadunit.cluster.ClusterMapStream.prepareSession(context, settings)?.let { profile ->
+                services.add(Control.Service.newBuilder().also { service ->
+                    service.id = Channel.ID_CLUSTER
+                    service.mediaSinkService = Control.Service.MediaSinkService.newBuilder().also { sink ->
+                        sink.availableType = Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP
+                        sink.audioType = Media.AudioStreamType.NONE
+                        sink.availableWhileInCall = true
+                        sink.addVideoConfigs(Control.Service.MediaSinkService.VideoConfiguration.newBuilder().apply {
+                            codecResolution = profile.resolution
+                            frameRate = Control.Service.MediaSinkService.VideoConfiguration.VideoFrameRateType._30
+                            setDensity(profile.density)
+                            setPixelAspectRatioE4(10000)
+                            setMarginWidth(profile.marginWidth)
+                            setMarginHeight(profile.marginHeight)
+                            setVideoCodecType(Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP)
+                        }.build())
+                        sink.setUnknownFields(com.andrerinas.openheadunit.cluster.ClusterSinkFields.cluster())
+                    }.build()
+                }.build())
+            }
+
             val input = Control.Service.newBuilder().also { service ->
                 service.id = Channel.ID_INP
                 service.inputSourceService = Control.Service.InputSourceService.newBuilder().also {

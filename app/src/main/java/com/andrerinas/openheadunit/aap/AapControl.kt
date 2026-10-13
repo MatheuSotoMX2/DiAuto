@@ -96,6 +96,14 @@ internal class AapControlMedia(
             aapTransport.gainVideoFocus()
         }
 
+        if (channel == Channel.ID_CLUSTER) {
+            // The cluster has no activity to wait for: take focus now so the phone starts the map.
+            // The same unsolicited nudge later asks for a keyframe when the decoder needs one.
+            val requestFocus = { aapTransport.send(VideoFocusEvent(gain = true, unsolicited = true, channel = Channel.ID_CLUSTER)) }
+            com.andrerinas.openheadunit.cluster.ClusterMapStream.onSetup(requestFocus)
+            requestFocus()
+        }
+
         // Pushing AudioFocusNotification
         if (Channel.isAudio(channel)) {
             aapAudio.precreateAudioTrack(channel)
@@ -110,6 +118,8 @@ internal class AapControlMedia(
     }
 
     private fun maxUnackedFor(channel: Int): Int {
+        // A map changes slowly; a small window keeps the cluster from competing with the main picture.
+        if (channel == Channel.ID_CLUSTER) return 4
         if (channel == Channel.ID_VID) {
             val softwareHevc =
                 aapTransport.settings.videoCodec == VideoDecoder.CodecType.H265.settingsValue &&
@@ -144,6 +154,8 @@ internal class AapControlMedia(
                 return 0
             }
             AppLog.i("Video Sink Stopped -> Normal background/transition behavior")
+        } else if (channel == Channel.ID_CLUSTER) {
+            AppLog.i("ClusterMap: the phone stopped the cluster stream")
         }
         return 0
     }
@@ -438,7 +450,7 @@ internal class AapControlGateway(
             Channel.ID_CTR -> return serviceControl.execute(message)
             Channel.ID_INP -> return touchControl.execute(message)
             Channel.ID_SEN -> return sensorControl.execute(message)
-            Channel.ID_VID, Channel.ID_AUD, Channel.ID_AU1, Channel.ID_AU2, Channel.ID_MIC -> return mediaControl.execute(message)
+            Channel.ID_VID, Channel.ID_CLUSTER, Channel.ID_AUD, Channel.ID_AU1, Channel.ID_AU2, Channel.ID_MIC -> return mediaControl.execute(message)
         }
         return 0
     }
