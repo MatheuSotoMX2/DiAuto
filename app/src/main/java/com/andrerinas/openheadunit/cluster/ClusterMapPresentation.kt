@@ -120,6 +120,7 @@ internal class ClusterMapPresentation(
     fun setStreamActive(active: Boolean) {
         if (streamActive == active) return
         streamActive = active
+        if (active && com.andrerinas.openheadunit.BuildConfig.DEBUG) scheduleSnapshot()
         val map = video ?: return
         val label = waiting ?: return
         map.animate().cancel()
@@ -133,6 +134,30 @@ internal class ClusterMapPresentation(
 
     fun setGuidance(guidance: BydGuidance?) {
         turnCard?.setGuidance(guidance)
+    }
+
+    /**
+     * Debug builds only: every 15 s while the map shows, the whole decoded stream frame goes to
+     * the app's files folder (cluster-stream.png), so where the phone draws the car can be
+     * measured. TextureView.getBitmap reads the buffer itself, not the cropped view.
+     */
+    private fun scheduleSnapshot() {
+        val view = video ?: return
+        view.postDelayed(object : Runnable {
+            override fun run() {
+                if (!streamActive || !isShowing) return
+                runCatching {
+                    val frame = view.getBitmap(profile.codecWidth, profile.codecHeight) ?: return@runCatching
+                    val dir = context.getExternalFilesDir(null) ?: return@runCatching
+                    java.io.File(dir, "cluster-stream.png").outputStream().use {
+                        frame.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                    frame.recycle()
+                    AppLog.i("ClusterMap: debug snapshot saved to ${dir.path}/cluster-stream.png")
+                }
+                view.postDelayed(this, 15_000L)
+            }
+        }, 3_000L)
     }
 }
 

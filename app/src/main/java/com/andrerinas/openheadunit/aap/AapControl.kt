@@ -84,6 +84,7 @@ internal class AapControlMedia(
         AppLog.i("Media Start Request %s: session=%d, config_index=%d", Channel.name(channel), request.sessionId, request.configurationIndex)
 
         aapTransport.setSessionId(channel, request.sessionId)
+        if (channel == Channel.ID_VID) com.andrerinas.openheadunit.cluster.ClusterMapStream.onMainVideoStarted()
         return 0
     }
 
@@ -108,11 +109,9 @@ internal class AapControlMedia(
         }
 
         if (channel == Channel.ID_CLUSTER) {
-            // Focus follows the phone's own request (answered above). A keyframe, when the decoder
-            // needs one, is asked for the way aa-proxy-rs restarts a stream: focus away and back.
-            com.andrerinas.openheadunit.cluster.ClusterMapStream.onSetup {
-                aapTransport.send(VideoFocusEvent(Media.VideoFocusMode.VIDEO_FOCUS_NATIVE, unsolicited = true, channel = Channel.ID_CLUSTER))
-                aapTransport.send(VideoFocusEvent(Media.VideoFocusMode.VIDEO_FOCUS_PROJECTED, unsolicited = true, channel = Channel.ID_CLUSTER))
+            // Focus is granted once the main picture runs, and the phone's own requests are answered above.
+            com.andrerinas.openheadunit.cluster.ClusterMapStream.onSetup { mode ->
+                aapTransport.send(VideoFocusEvent(mode, unsolicited = true, channel = Channel.ID_CLUSTER))
             }
         }
 

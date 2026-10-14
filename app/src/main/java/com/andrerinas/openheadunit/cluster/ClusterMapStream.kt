@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.view.Surface
 import androidx.annotation.ChecksSdkIntAtLeast
+import com.andrerinas.openheadunit.aap.protocol.proto.Media
 import com.andrerinas.openheadunit.hud.BydGuidance
 import com.andrerinas.openheadunit.utils.AppLog
 import com.andrerinas.openheadunit.utils.Settings
@@ -27,8 +28,6 @@ internal object ClusterMapStream {
     @Volatile var guidance: BydGuidance? = null
 
     private val lock = Any()
-    // Protocol minor the current connection runs at; cluster displays came with 1.6.
-    @Volatile private var protocolMinor = 2
     // A phone that refuses a cluster description closes the session before setting up the main
     // picture. The next connection then tries the next description of the ladder; after the last
     // one the cluster is not offered again in this run, so the phone always gets back in.
@@ -37,9 +36,14 @@ internal object ClusterMapStream {
     val refusedThisRun: Boolean get() = ladderIndex >= ClusterStreamProfile.LADDER.size
     private var offered = false
     private var mainVideoSetUp = false
+    // Cluster focus waits until the main picture runs: granted at setup, before the phone had
+    // started the main stream, it made the phone restart its projection about a second later.
+    private var mainVideoStarted = false
+    private var clusterSetUp = false
+    private var focusGranted = false
     private var decoder: ClusterVideoDecoder? = null
     private var surface: Surface? = null
-    @Volatile private var sendKeyframeRequest: (() -> Unit)? = null
+    @Volatile private var sendFocus: ((Media.VideoFocusMode) -> Unit)? = null
 
     @ChecksSdkIntAtLeast(api = Build.VERSION_CODES.P)
     fun available(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
@@ -52,13 +56,12 @@ internal object ClusterMapStream {
         endSessionLocked()
         offered = false
         mainVideoSetUp = false
+        mainVideoStarted = false
+        clusterSetUp = false
+        focusGranted = false
         if (!available() || !settings.bydClusterMapEnabled) return null
         if (refusedThisRun) {
             AppLog.w("ClusterMap: not offering the cluster display: the phone refused every description of it. Restart DiAuto to try again.")
-            return null
-        }
-        if (protocolMinor < MIN_PROTOCOL_MINOR) {
-            AppLog.i("ClusterMap: not offering the cluster display: this connection runs protocol 1.$protocolMinor, cluster displays need 1.$MIN_PROTOCOL_MINOR.")
             return null
         }
         val theme = ClusterLayout.theme(settings.bydClusterLayout)
@@ -76,10 +79,6 @@ internal object ClusterMapStream {
         profile
     }
 
-    fun onProtocolNegotiated(minor: Int) {
-        protocolMinor = minor
-    }
-
     /** The phone set up the main picture, so it accepted the displays it was offered. */
     fun onMainVideoSetup() = synchronized(lock) {
         mainVideoSetUp = true
@@ -90,10 +89,25 @@ internal object ClusterMapStream {
         }
     }
 
-    /** The phone set up the cluster stream; [requestKeyframe] sends it a video focus nudge. */
-    fun onSetup(requestKeyframe: () -> Unit) {
-        sendKeyframeRequest = requestKeyframe
-        synchronized(lock) { ensureDecoderLocked() }
+    /** The phone set up the cluster stream; [focus] sends a video focus notification on its channel. */
+    fun onSetup(focus: (Media.VideoFocusMode) -> Unit) = synchronized(lock) {
+        sendFocus = focus
+        clusterSetUp = true
+        ensureDecoderLocked()
+        grantFocusWhenReadyLocked()
+    }
+
+    /** The phone started the main picture; the cluster may have focus now. */
+    fun onMainVideoStarted() = synchronized(lock) {
+        mainVideoStarted = true
+        grantFocusWhenReadyLocked()
+    }
+
+    private fun grantFocusWhenReadyLocked() {
+        if (focusGranted || !clusterSetUp || !mainVideoStarted) return
+        focusGranted = true
+        AppLog.i("ClusterMap: main picture running; granting the cluster display focus")
+        runCatching { sendFocus?.invoke(Media.VideoFocusMode.VIDEO_FOCUS_PROJECTED) }
     }
 
     fun onFrame(buf: ByteArray, offset: Int, length: Int) {
@@ -132,7 +146,10 @@ internal object ClusterMapStream {
         session = null
         streamActive = false
         guidance = null
-        sendKeyframeRequest = null
+        sendFocus = null
+        clusterSetUp = false
+        mainVideoStarted = false
+        focusGranted = false
     }
 
     private fun ensureDecoderLocked(): ClusterVideoDecoder? {
@@ -142,7 +159,14 @@ internal object ClusterMapStream {
         return ClusterVideoDecoder(
             current.profile.codecWidth, current.profile.codecHeight,
             onPicture = { streamActive = true },
-            requestKeyframe = { runCatching { sendKeyframeRequest?.invoke() } },
+            // Focus away and back makes the phone restart the stream with a keyframe, as
+            // aa-proxy-rs does for a new viewer. Only once the cluster has focus at all.
+            requestKeyframe = {
+                if (focusGranted) runCatching {
+                    sendFocus?.invoke(Media.VideoFocusMode.VIDEO_FOCUS_NATIVE)
+                    sendFocus?.invoke(Media.VideoFocusMode.VIDEO_FOCUS_PROJECTED)
+                }
+            },
         ).also { created ->
             decoder = created
             surface?.let(created::setSurface)
@@ -156,13 +180,7 @@ internal object ClusterMapStream {
             "theme=$theme measuredFirmware=${ClusterLayout.supported()} " +
             "display=${if (available()) ClusterLayout.findDisplay(context, theme)?.name ?: "none" else "unsupported"} " +
             "session=${current?.let { "${it.displayName} ${it.profile.name}" } ?: "none"} " +
-            "picture=$streamActive protocol=1.$protocolMinor accepted=${acceptedProfile ?: "none"} " +
+            "picture=$streamActive accepted=${acceptedProfile ?: "none"} " +
             "refused=${ClusterStreamProfile.LADDER.take(ladderIndex).joinToString("/") { it.name }.ifEmpty { "none" }}"
     }
-
-    /**
-     * A 1.2 session that offered the cluster was closed by a OnePlus 15 right after service
-     * discovery. web-auto, whose cluster video works, declares its displays at 1.6.
-     */
-    private const val MIN_PROTOCOL_MINOR = 6
 }
