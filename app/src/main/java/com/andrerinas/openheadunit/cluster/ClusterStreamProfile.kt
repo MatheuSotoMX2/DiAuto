@@ -29,12 +29,13 @@ internal data class ClusterStreamProfile(
 
         /** Tried in order, one per connection, until the phone accepts one. */
         val LADDER = listOf(
-            // aa-proxy-rs's cluster defaults, which phones accept when it adds them to a car's discovery response.
-            ClusterStreamProfile("1280x720", VideoCodecResolutionType._1280x720, 1280, 720,
-                viewingDistance = 300, realDensity = DENSITY_DPI),
-            // The same with aa-proxy-rs's optional cluster input source, in case the phone wants one.
+            // aa-proxy-rs's cluster defaults with its D-pad input source: accepted by a OnePlus 15,
+            // where the same without the input source was refused.
             ClusterStreamProfile("1280x720+input", VideoCodecResolutionType._1280x720, 1280, 720,
                 viewingDistance = 300, realDensity = DENSITY_DPI, withInput = true),
+            // aa-proxy-rs's cluster defaults without an input source.
+            ClusterStreamProfile("1280x720", VideoCodecResolutionType._1280x720, 1280, 720,
+                viewingDistance = 300, realDensity = DENSITY_DPI),
             // The cluster example of Android's desktop head unit.
             ClusterStreamProfile("800x480", VideoCodecResolutionType._800x480, 800, 480),
         )

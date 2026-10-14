@@ -24,12 +24,12 @@ class ClusterMapTest {
         assertEquals(VideoCodecResolutionType._1280x720, first.resolution)
         assertEquals(300, first.viewingDistance)
         assertEquals(160, first.realDensity)
+        assertTrue("the description the OnePlus 15 accepted goes first", first.withInput)
         val last = ClusterStreamProfile.LADDER.last()
         assertEquals(VideoCodecResolutionType._800x480, last.resolution)
         assertNull(last.viewingDistance)
         assertEquals(3, ClusterStreamProfile.LADDER.size)
-        assertTrue(ClusterStreamProfile.LADDER[1].withInput)
-        assertFalse(first.withInput || last.withInput)
+        assertFalse(ClusterStreamProfile.LADDER[1].withInput || last.withInput)
     }
 
     @Test fun `display selection never swaps the side layer for the full one`() {
@@ -71,7 +71,7 @@ class ClusterMapTest {
             .setCodecResolution(VideoCodecResolutionType._1280x720)
             .setFrameRate(Control.Service.MediaSinkService.VideoConfiguration.VideoFrameRateType._30)
             .setMarginWidth(0).setMarginHeight(0).setDensity(160)
-            .setUnknownFields(ClusterSinkFields.videoExtras(ClusterStreamProfile.LADDER.first()))
+            .setUnknownFields(ClusterSinkFields.videoExtras(ClusterStreamProfile.LADDER[1]))
             .build()
         val fields = mutableMapOf<Int, Long>()
         val input = CodedInputStream.newInstance(config.toByteArray())

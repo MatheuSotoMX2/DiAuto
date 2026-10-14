@@ -1,7 +1,11 @@
 package com.andrerinas.openheadunit.cluster
 
+import android.graphics.ImageFormat
+import android.hardware.HardwareBuffer
+import android.media.ImageReader
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
@@ -16,6 +20,11 @@ import com.andrerinas.openheadunit.utils.AppLog
  * decoders must never share a surface or a codec, and a failure here must not touch the main
  * picture. Everything that touches the codec runs on one thread. After any (re)start the decoder
  * waits for an IDR frame and asks the phone for one, so it never shows a smeared picture.
+ *
+ * The phone starts the cluster stream about a tenth of a second after setup, before the cluster
+ * window has a surface, and a still map may not send another keyframe for a long time. So until
+ * a window is there the decoder draws into a hidden placeholder, and windows are handed over with
+ * setOutputSurface, keeping the reference frames: the map appears as soon as the window does.
  */
 @RequiresApi(23)
 internal class ClusterVideoDecoder(
@@ -30,6 +39,7 @@ internal class ClusterVideoDecoder(
     // Decoder thread only.
     private var codec: MediaCodec? = null
     private var surface: Surface? = null
+    private var placeholder: ImageReader? = null
     private var parameterSets: ByteArray? = null
     private var waitingForKeyframe = true
     private val pending = ArrayDeque<Pair<ByteArray, Int>>()
@@ -42,24 +52,37 @@ internal class ClusterVideoDecoder(
     fun setSurface(next: Surface?) {
         handler.post {
             if (released || next === surface) return@post
-            val running = codec
-            if (running != null && next != null) {
-                // A direct handoff keeps the reference frames, so the map continues without an IDR.
-                try {
-                    running.setOutputSurface(next)
-                    surface = next
-                    return@post
-                } catch (error: RuntimeException) {
-                    AppLog.w("ClusterMap: surface handoff failed, restarting the decoder: ${error.message}")
-                }
-            }
-            stopCodec()
             surface = next
-            if (next != null) {
+            val running = codec ?: return@post
+            // A direct handoff keeps the reference frames, so the map continues without an IDR.
+            try {
+                running.setOutputSurface(outputSurface())
+                if (next != null) {
+                    // A still map may not send another frame for a while; ask for a full one now,
+                    // and report the first picture that reaches this window.
+                    pictureShown = false
+                    askForKeyframe()
+                }
+            } catch (error: RuntimeException) {
+                AppLog.w("ClusterMap: surface handoff failed, restarting the decoder: ${error.message}")
+                stopCodec()
                 startCodec()
                 askForKeyframe()
             }
         }
+    }
+
+    /** The cluster window's surface, or the hidden placeholder while there is none. */
+    private fun outputSurface(): Surface {
+        surface?.let { return it }
+        val reader = placeholder ?: (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            ImageReader.newInstance(width, height, ImageFormat.PRIVATE, 3, HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE)
+        else ImageReader.newInstance(width, height, ImageFormat.PRIVATE, 3)).also { created ->
+            // Nothing shows these frames; returning each buffer at once keeps the decoder running.
+            created.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, handler)
+            placeholder = created
+        }
+        return reader.surface
     }
 
     fun decode(buf: ByteArray, offset: Int, length: Int) {
@@ -73,6 +96,8 @@ internal class ClusterVideoDecoder(
             released = true
             stopCodec()
             surface = null
+            placeholder?.close()
+            placeholder = null
             thread.quitSafely()
         }
     }
@@ -80,7 +105,6 @@ internal class ClusterVideoDecoder(
     private fun onAccessUnit(unit: ByteArray) {
         val nal = AvcNal.scan(unit)
         if (nal.hasSps && nal.hasPps) parameterSets = AvcNal.parameterSets(unit)
-        if (surface == null) return
         if (codec == null && !startCodec()) return
         if (nal.onlyParameterSets) {
             enqueue(unit, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
@@ -110,7 +134,6 @@ internal class ClusterVideoDecoder(
     }
 
     private fun startCodec(): Boolean {
-        val target = surface ?: return false
         val config = parameterSets ?: run {
             askForKeyframe()
             return false
@@ -118,7 +141,7 @@ internal class ClusterVideoDecoder(
         return try {
             val created = MediaCodec.createDecoderByType(MIME)
             created.setCallback(callback, handler)
-            created.configure(MediaFormat.createVideoFormat(MIME, width, height), target, null, 0)
+            created.configure(MediaFormat.createVideoFormat(MIME, width, height), outputSurface(), null, 0)
             created.start()
             codec = created
             pending.clear()

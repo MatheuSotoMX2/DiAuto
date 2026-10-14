@@ -103,8 +103,14 @@ internal object ClusterMapStream {
 
     fun setSurface(next: Surface?) = synchronized(lock) {
         surface = next
-        if (next == null) streamActive = false
+        // A new window shows the spinner until a picture reaches it.
+        streamActive = false
         decoder?.setSurface(next)
+    }
+
+    /** The phone's answer-awaiting focus request for the cluster, already granted by the caller. */
+    fun onFocus(mode: com.andrerinas.openheadunit.aap.protocol.proto.Media.VideoFocusMode) {
+        AppLog.i("ClusterMap: the phone asked for cluster focus $mode; granted")
     }
 
     fun endSession() = synchronized(lock) {

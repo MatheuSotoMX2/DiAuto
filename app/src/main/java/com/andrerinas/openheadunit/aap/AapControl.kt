@@ -46,7 +46,17 @@ internal class AapControlMedia(
             Media.MsgType.MEDIA_MESSAGE_STOP_VALUE -> return mediaSinkStopRequest(message.channel)
             Media.MsgType.MEDIA_MESSAGE_VIDEO_FOCUS_REQUEST_VALUE -> {
                 val focusRequest = message.parse(Media.VideoFocusRequestNotification.newBuilder()).build()
-                AppLog.i("RX: Video Focus Request - mode: %s, reason: %s", focusRequest.mode, focusRequest.reason)
+                AppLog.i("RX: Video Focus Request on %s - mode: %s, reason: %s", Channel.name(message.channel), focusRequest.mode, focusRequest.reason)
+
+                if (message.channel == Channel.ID_CLUSTER) {
+                    // The phone waits for the answer to a cluster focus request; left unanswered it
+                    // restarted its projection about a second later, every session. Grant what it
+                    // asks for, as aa-proxy-rs does for the displays it adds. A NATIVE request here
+                    // is the cluster's own business and never the user leaving Android Auto.
+                    aapTransport.send(VideoFocusEvent(focusRequest.mode, unsolicited = false, channel = Channel.ID_CLUSTER))
+                    com.andrerinas.openheadunit.cluster.ClusterMapStream.onFocus(focusRequest.mode)
+                    return 0
+                }
 
                 if (focusRequest.mode == Media.VideoFocusMode.VIDEO_FOCUS_NATIVE) {
                     AppLog.i("Video Focus NATIVE received. User likely clicked Exit. Stopping transport.")
@@ -98,11 +108,12 @@ internal class AapControlMedia(
         }
 
         if (channel == Channel.ID_CLUSTER) {
-            // The cluster has no activity to wait for: take focus now so the phone starts the map.
-            // The same unsolicited nudge later asks for a keyframe when the decoder needs one.
-            val requestFocus = { aapTransport.send(VideoFocusEvent(gain = true, unsolicited = true, channel = Channel.ID_CLUSTER)) }
-            com.andrerinas.openheadunit.cluster.ClusterMapStream.onSetup(requestFocus)
-            requestFocus()
+            // Focus follows the phone's own request (answered above). A keyframe, when the decoder
+            // needs one, is asked for the way aa-proxy-rs restarts a stream: focus away and back.
+            com.andrerinas.openheadunit.cluster.ClusterMapStream.onSetup {
+                aapTransport.send(VideoFocusEvent(Media.VideoFocusMode.VIDEO_FOCUS_NATIVE, unsolicited = true, channel = Channel.ID_CLUSTER))
+                aapTransport.send(VideoFocusEvent(Media.VideoFocusMode.VIDEO_FOCUS_PROJECTED, unsolicited = true, channel = Channel.ID_CLUSTER))
+            }
         }
 
         // Pushing AudioFocusNotification
