@@ -14,35 +14,22 @@ import org.junit.Test
 class ClusterMapTest {
     private val fingerprint = ClusterLayout.DILINK51_FINGERPRINT
 
-    @Test fun `DiLink 5_1 map windows get streams shaped like the window`() {
-        val full = ClusterLayout.plan(1920, 720, ClusterLayout.Theme.MAP, fingerprint)!!
-        assertEquals(ClusterLayout.Plan(0, 144, 1920, 480, true), full)
-        val fullStream = ClusterStreamProfile.forViewport(full.width, full.height)!!
-        assertEquals(VideoCodecResolutionType._1920x1080, fullStream.resolution)
-        assertEquals(0, fullStream.marginWidth)
-        assertEquals(600, fullStream.marginHeight)
-        assertEquals(300, fullStream.contentTop)
-
-        val side = ClusterLayout.plan(1920, 720, ClusterLayout.Theme.SCENARIO, fingerprint)!!
-        assertEquals(ClusterLayout.Plan(1320, 0, 600, 720, false), side)
-        val sideStream = ClusterStreamProfile.forViewport(side.width, side.height)!!
-        assertEquals(VideoCodecResolutionType._1280x720, sideStream.resolution)
-        assertEquals(680, sideStream.marginWidth)
-        assertEquals(0, sideStream.marginHeight)
-        assertEquals(340, sideStream.contentLeft)
+    @Test fun `DiLink 5_1 map windows are the measured ones`() {
+        assertEquals(ClusterLayout.Plan(0, 144, 1920, 480, true), ClusterLayout.plan(1920, 720, ClusterLayout.Theme.MAP, fingerprint))
+        assertEquals(ClusterLayout.Plan(1320, 0, 600, 720, false), ClusterLayout.plan(1920, 720, ClusterLayout.Theme.SCENARIO, fingerprint))
     }
 
-    @Test fun `other panels fit the smallest codec size or scale down`() {
-        val dilink5 = ClusterStreamProfile.forViewport(1920, 720)!!
-        assertEquals(VideoCodecResolutionType._1920x1080, dilink5.resolution)
-        assertEquals(360, dilink5.marginHeight)
-        val small = ClusterStreamProfile.forViewport(800, 480)!!
-        assertEquals(VideoCodecResolutionType._800x480, small.resolution)
-        assertEquals(0, small.marginWidth + small.marginHeight)
-        val large = ClusterStreamProfile.forViewport(2560, 960)!!
-        assertEquals(1920, large.contentWidth)
-        assertEquals(720, large.contentHeight)
-        assertNull(ClusterStreamProfile.forViewport(0, 720))
+    @Test fun `the cluster descriptions copy ones phones accept and carry no margins`() {
+        val first = ClusterStreamProfile.LADDER.first()
+        assertEquals(VideoCodecResolutionType._1280x720, first.resolution)
+        assertEquals(300, first.viewingDistance)
+        assertEquals(160, first.realDensity)
+        val last = ClusterStreamProfile.LADDER.last()
+        assertEquals(VideoCodecResolutionType._800x480, last.resolution)
+        assertNull(last.viewingDistance)
+        assertEquals(3, ClusterStreamProfile.LADDER.size)
+        assertTrue(ClusterStreamProfile.LADDER[1].withInput)
+        assertFalse(first.withInput || last.withInput)
     }
 
     @Test fun `display selection never swaps the side layer for the full one`() {
@@ -79,10 +66,23 @@ class ClusterMapTest {
         assertEquals(Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP_VALUE.toLong(), fields[1])
     }
 
-    @Test fun `the main sink spells out display id 0 and the main type when a cluster is offered`() {
-        val fields = varints(ClusterSinkFields.main())
-        assertEquals(0L, fields[6])
-        assertEquals(0L, fields[7])
+    @Test fun `viewing distance and real density are written only when the description sets them`() {
+        val config = Control.Service.MediaSinkService.VideoConfiguration.newBuilder()
+            .setCodecResolution(VideoCodecResolutionType._1280x720)
+            .setFrameRate(Control.Service.MediaSinkService.VideoConfiguration.VideoFrameRateType._30)
+            .setMarginWidth(0).setMarginHeight(0).setDensity(160)
+            .setUnknownFields(ClusterSinkFields.videoExtras(ClusterStreamProfile.LADDER.first()))
+            .build()
+        val fields = mutableMapOf<Int, Long>()
+        val input = CodedInputStream.newInstance(config.toByteArray())
+        while (!input.isAtEnd) {
+            val tag = input.readTag()
+            if (WireFormat.getTagWireType(tag) == WireFormat.WIRETYPE_VARINT) fields[WireFormat.getTagFieldNumber(tag)] = input.readInt64()
+            else input.skipField(tag)
+        }
+        assertEquals(300L, fields[7])
+        assertEquals(160L, fields[9])
+        assertTrue(ClusterSinkFields.videoExtras(ClusterStreamProfile.LADDER.last()).asMap().isEmpty())
     }
 
     @Test fun `parameter sets and keyframes are recognised in an access unit`() {

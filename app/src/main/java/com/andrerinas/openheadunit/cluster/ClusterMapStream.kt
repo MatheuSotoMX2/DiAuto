@@ -29,10 +29,12 @@ internal object ClusterMapStream {
     private val lock = Any()
     // Protocol minor the current connection runs at; cluster displays came with 1.6.
     @Volatile private var protocolMinor = 2
-    // A phone that refused the cluster display closed the session before setting up the main
-    // picture. Stop offering it for the rest of this run so the next connection works.
-    @Volatile var refusedThisRun = false
-        private set
+    // A phone that refuses a cluster description closes the session before setting up the main
+    // picture. The next connection then tries the next description of the ladder; after the last
+    // one the cluster is not offered again in this run, so the phone always gets back in.
+    @Volatile private var ladderIndex = 0
+    @Volatile private var acceptedProfile: String? = null
+    val refusedThisRun: Boolean get() = ladderIndex >= ClusterStreamProfile.LADDER.size
     private var offered = false
     private var mainVideoSetUp = false
     private var decoder: ClusterVideoDecoder? = null
@@ -52,7 +54,7 @@ internal object ClusterMapStream {
         mainVideoSetUp = false
         if (!available() || !settings.bydClusterMapEnabled) return null
         if (refusedThisRun) {
-            AppLog.w("ClusterMap: not offering the cluster display: the phone ended an earlier session that offered it before any video. Restart DiAuto to try again.")
+            AppLog.w("ClusterMap: not offering the cluster display: the phone refused every description of it. Restart DiAuto to try again.")
             return null
         }
         if (protocolMinor < MIN_PROTOCOL_MINOR) {
@@ -66,12 +68,11 @@ internal object ClusterMapStream {
         }
         val size = ClusterLayout.sizeOf(display)
         val plan = ClusterLayout.plan(size.x, size.y, theme)
-        val profile = (if (plan != null) ClusterStreamProfile.forViewport(plan.width, plan.height)
-            else ClusterStreamProfile.forViewport(size.x, size.y)) ?: return null
+        val profile = ClusterStreamProfile.LADDER[ladderIndex]
         session = Session(profile, display.name, theme)
         offered = true
-        AppLog.i("ClusterMap: offering a cluster display for ${display.name} ${size.x}x${size.y} theme=$theme " +
-            "plan=$plan stream=${profile.codecWidth}x${profile.codecHeight} content=${profile.contentWidth}x${profile.contentHeight}")
+        AppLog.i("ClusterMap: offering a cluster display (${profile.name}, description ${ladderIndex + 1} of " +
+            "${ClusterStreamProfile.LADDER.size}) for ${display.name} ${size.x}x${size.y} theme=$theme plan=$plan")
         profile
     }
 
@@ -80,7 +81,14 @@ internal object ClusterMapStream {
     }
 
     /** The phone set up the main picture, so it accepted the displays it was offered. */
-    fun onMainVideoSetup() = synchronized(lock) { mainVideoSetUp = true }
+    fun onMainVideoSetup() = synchronized(lock) {
+        mainVideoSetUp = true
+        val current = session
+        if (offered && current != null && acceptedProfile != current.profile.name) {
+            acceptedProfile = current.profile.name
+            AppLog.i("ClusterMap: the phone accepted the cluster display (${current.profile.name})")
+        }
+    }
 
     /** The phone set up the cluster stream; [requestKeyframe] sends it a video focus nudge. */
     fun onSetup(requestKeyframe: () -> Unit) {
@@ -100,9 +108,12 @@ internal object ClusterMapStream {
     }
 
     fun endSession() = synchronized(lock) {
-        if (offered && !mainVideoSetUp && !refusedThisRun) {
-            refusedThisRun = true
-            AppLog.w("ClusterMap: the session that offered the cluster display ended before the phone set up any video. Not offering it again until DiAuto restarts.")
+        val current = session
+        if (offered && !mainVideoSetUp && current != null && !refusedThisRun) {
+            ladderIndex++
+            AppLog.w("ClusterMap: the phone ended the session that offered the cluster display (${current.profile.name}) " +
+                "before setting up any video. " + if (refusedThisRun) "Not offering it again until DiAuto restarts."
+                else "The next connection offers ${ClusterStreamProfile.LADDER[ladderIndex].name}.")
         }
         offered = false
         mainVideoSetUp = false
@@ -138,8 +149,9 @@ internal object ClusterMapStream {
         return "Dashboard map: enabled=${settings.bydClusterMapEnabled} turnCard=${settings.bydClusterTurnCardEnabled} " +
             "theme=$theme measuredFirmware=${ClusterLayout.supported()} " +
             "display=${if (available()) ClusterLayout.findDisplay(context, theme)?.name ?: "none" else "unsupported"} " +
-            "session=${current?.let { "${it.displayName} ${it.profile.codecWidth}x${it.profile.codecHeight} content=${it.profile.contentWidth}x${it.profile.contentHeight}" } ?: "none"} " +
-            "picture=$streamActive protocol=1.$protocolMinor refusedThisRun=$refusedThisRun"
+            "session=${current?.let { "${it.displayName} ${it.profile.name}" } ?: "none"} " +
+            "picture=$streamActive protocol=1.$protocolMinor accepted=${acceptedProfile ?: "none"} " +
+            "refused=${ClusterStreamProfile.LADDER.take(ladderIndex).joinToString("/") { it.name }.ifEmpty { "none" }}"
     }
 
     /**

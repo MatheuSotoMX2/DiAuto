@@ -66,12 +66,13 @@ internal class ClusterMapPresentation(
             }
         val textureView = TextureView(context)
         fun cropToContent() {
-            // Show only the phone's picture: the margins it was asked to leave are cut away.
+            // Fill the window at the stream's own aspect, cropping the overflow around the centre,
+            // where the phone keeps the car marker (DiPlay crops its CarPlay map the same way).
             val w = textureView.width.toFloat().takeIf { it > 0 } ?: return
             val h = textureView.height.toFloat().takeIf { it > 0 } ?: return
+            val scale = maxOf(w / profile.codecWidth, h / profile.codecHeight)
             textureView.setTransform(Matrix().apply {
-                setScale(profile.codecWidth.toFloat() / profile.contentWidth, profile.codecHeight.toFloat() / profile.contentHeight)
-                postTranslate(-profile.contentLeft * w / profile.contentWidth, -profile.contentTop * h / profile.contentHeight)
+                setScale(profile.codecWidth * scale / w, profile.codecHeight * scale / h, w / 2f, h / 2f)
             })
         }
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {

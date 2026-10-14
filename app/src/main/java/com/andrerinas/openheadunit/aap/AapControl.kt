@@ -449,7 +449,7 @@ internal class AapControlGateway(
 
         when (message.channel) {
             Channel.ID_CTR -> return serviceControl.execute(message)
-            Channel.ID_INP -> return touchControl.execute(message)
+            Channel.ID_INP, Channel.ID_CLUSTER_INPUT -> return touchControl.execute(message)
             Channel.ID_SEN -> return sensorControl.execute(message)
             Channel.ID_VID, Channel.ID_CLUSTER, Channel.ID_AUD, Channel.ID_AU1, Channel.ID_AU2, Channel.ID_MIC -> return mediaControl.execute(message)
         }
