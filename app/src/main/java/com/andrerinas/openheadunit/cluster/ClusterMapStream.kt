@@ -144,10 +144,14 @@ internal object ClusterMapStream {
 
     fun endSession() = synchronized(lock) {
         val current = session
-        if (offered && !mainVideoSetUp && current != null && !refusedThisRun) {
+        // A refusal shows as a session that ends before the main picture starts: either at once,
+        // or about a second in, when Google Maps starts guidance and the phone restarts its
+        // projection after setting the displays up.
+        if (offered && !mainVideoStarted && current != null && !refusedThisRun) {
             ladderIndex++
-            AppLog.w("ClusterMap: the phone ended the session that offered the cluster display (${current.profile.name}) " +
-                "before setting up any video. " + if (refusedThisRun) "Not offering it again until DiAuto restarts."
+            AppLog.w("ClusterMap: the session that offered the cluster display (${current.profile.name}) ended before the main " +
+                "picture started (setup ${if (mainVideoSetUp) "done" else "not reached"}). " +
+                if (refusedThisRun) "Not offering it again until DiAuto restarts."
                 else "The next connection offers ${ClusterStreamProfile.LADDER[ladderIndex].name}.")
         }
         offered = false
