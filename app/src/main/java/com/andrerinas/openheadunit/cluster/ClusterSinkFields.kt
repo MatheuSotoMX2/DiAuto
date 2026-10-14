@@ -13,8 +13,16 @@ internal object ClusterSinkFields {
     const val DISPLAY_TYPE_CLUSTER = 1L
     const val CLUSTER_DISPLAY_ID = 1L
 
-    fun cluster(): UnknownFieldSet = UnknownFieldSet.newBuilder()
-        .addField(DISPLAY_ID_FIELD, UnknownFieldSet.Field.newBuilder().addVarint(CLUSTER_DISPLAY_ID).build())
-        .addField(DISPLAY_TYPE_FIELD, UnknownFieldSet.Field.newBuilder().addVarint(DISPLAY_TYPE_CLUSTER).build())
+    const val DISPLAY_TYPE_MAIN = 0L
+    const val MAIN_DISPLAY_ID = 0L
+
+    fun cluster(): UnknownFieldSet = display(CLUSTER_DISPLAY_ID, DISPLAY_TYPE_CLUSTER)
+
+    /** Spelled out on the main sink when a cluster is offered, as web-auto does for every display. */
+    fun main(): UnknownFieldSet = display(MAIN_DISPLAY_ID, DISPLAY_TYPE_MAIN)
+
+    private fun display(id: Long, type: Long): UnknownFieldSet = UnknownFieldSet.newBuilder()
+        .addField(DISPLAY_ID_FIELD, UnknownFieldSet.Field.newBuilder().addVarint(id).build())
+        .addField(DISPLAY_TYPE_FIELD, UnknownFieldSet.Field.newBuilder().addVarint(type).build())
         .build()
 }

@@ -27,6 +27,14 @@ internal object ClusterMapStream {
     @Volatile var guidance: BydGuidance? = null
 
     private val lock = Any()
+    // Protocol minor the current connection runs at; cluster displays came with 1.6.
+    @Volatile private var protocolMinor = 2
+    // A phone that refused the cluster display closed the session before setting up the main
+    // picture. Stop offering it for the rest of this run so the next connection works.
+    @Volatile var refusedThisRun = false
+        private set
+    private var offered = false
+    private var mainVideoSetUp = false
     private var decoder: ClusterVideoDecoder? = null
     private var surface: Surface? = null
     @Volatile private var sendKeyframeRequest: (() -> Unit)? = null
@@ -40,7 +48,17 @@ internal object ClusterMapStream {
      */
     fun prepareSession(context: Context, settings: Settings): ClusterStreamProfile? = synchronized(lock) {
         endSessionLocked()
+        offered = false
+        mainVideoSetUp = false
         if (!available() || !settings.bydClusterMapEnabled) return null
+        if (refusedThisRun) {
+            AppLog.w("ClusterMap: not offering the cluster display: the phone ended an earlier session that offered it before any video. Restart DiAuto to try again.")
+            return null
+        }
+        if (protocolMinor < MIN_PROTOCOL_MINOR) {
+            AppLog.i("ClusterMap: not offering the cluster display: this connection runs protocol 1.$protocolMinor, cluster displays need 1.$MIN_PROTOCOL_MINOR.")
+            return null
+        }
         val theme = ClusterLayout.theme(settings.bydClusterLayout)
         val display = ClusterLayout.findDisplay(context, theme) ?: run {
             AppLog.i("ClusterMap: enabled, but no cluster projection display among ${ClusterLayout.describeDisplays(context)}")
@@ -51,10 +69,18 @@ internal object ClusterMapStream {
         val profile = (if (plan != null) ClusterStreamProfile.forViewport(plan.width, plan.height)
             else ClusterStreamProfile.forViewport(size.x, size.y)) ?: return null
         session = Session(profile, display.name, theme)
+        offered = true
         AppLog.i("ClusterMap: offering a cluster display for ${display.name} ${size.x}x${size.y} theme=$theme " +
             "plan=$plan stream=${profile.codecWidth}x${profile.codecHeight} content=${profile.contentWidth}x${profile.contentHeight}")
         profile
     }
+
+    fun onProtocolNegotiated(minor: Int) {
+        protocolMinor = minor
+    }
+
+    /** The phone set up the main picture, so it accepted the displays it was offered. */
+    fun onMainVideoSetup() = synchronized(lock) { mainVideoSetUp = true }
 
     /** The phone set up the cluster stream; [requestKeyframe] sends it a video focus nudge. */
     fun onSetup(requestKeyframe: () -> Unit) {
@@ -73,7 +99,15 @@ internal object ClusterMapStream {
         decoder?.setSurface(next)
     }
 
-    fun endSession() = synchronized(lock) { endSessionLocked() }
+    fun endSession() = synchronized(lock) {
+        if (offered && !mainVideoSetUp && !refusedThisRun) {
+            refusedThisRun = true
+            AppLog.w("ClusterMap: the session that offered the cluster display ended before the phone set up any video. Not offering it again until DiAuto restarts.")
+        }
+        offered = false
+        mainVideoSetUp = false
+        endSessionLocked()
+    }
 
     private fun endSessionLocked() {
         decoder?.release()
@@ -105,6 +139,12 @@ internal object ClusterMapStream {
             "theme=$theme measuredFirmware=${ClusterLayout.supported()} " +
             "display=${if (available()) ClusterLayout.findDisplay(context, theme)?.name ?: "none" else "unsupported"} " +
             "session=${current?.let { "${it.displayName} ${it.profile.codecWidth}x${it.profile.codecHeight} content=${it.profile.contentWidth}x${it.profile.contentHeight}" } ?: "none"} " +
-            "picture=$streamActive"
+            "picture=$streamActive protocol=1.$protocolMinor refusedThisRun=$refusedThisRun"
     }
+
+    /**
+     * A 1.2 session that offered the cluster was closed by a OnePlus 15 right after service
+     * discovery. web-auto, whose cluster video works, declares its displays at 1.6.
+     */
+    private const val MIN_PROTOCOL_MINOR = 6
 }

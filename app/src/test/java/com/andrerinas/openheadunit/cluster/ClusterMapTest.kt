@@ -57,10 +57,10 @@ class ClusterMapTest {
         assertEquals(ClusterLayout.Theme.SCENARIO, ClusterLayout.theme(7))
     }
 
-    @Test fun `the cluster sink carries display id 1 and the cluster display type`() {
+    private fun varints(unknown: com.google.protobuf.UnknownFieldSet): Map<Int, Long> {
         val sink = Control.Service.MediaSinkService.newBuilder()
             .setAvailableType(Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP)
-            .setUnknownFields(ClusterSinkFields.cluster())
+            .setUnknownFields(unknown)
             .build()
         val fields = mutableMapOf<Int, Long>()
         val input = CodedInputStream.newInstance(sink.toByteArray())
@@ -69,9 +69,20 @@ class ClusterMapTest {
             if (WireFormat.getTagWireType(tag) == WireFormat.WIRETYPE_VARINT) fields[WireFormat.getTagFieldNumber(tag)] = input.readInt64()
             else input.skipField(tag)
         }
+        return fields
+    }
+
+    @Test fun `the cluster sink carries display id 1 and the cluster display type`() {
+        val fields = varints(ClusterSinkFields.cluster())
         assertEquals(1L, fields[6])
         assertEquals(1L, fields[7])
         assertEquals(Media.MediaCodecType.MEDIA_CODEC_VIDEO_H264_BP_VALUE.toLong(), fields[1])
+    }
+
+    @Test fun `the main sink spells out display id 0 and the main type when a cluster is offered`() {
+        val fields = varints(ClusterSinkFields.main())
+        assertEquals(0L, fields[6])
+        assertEquals(0L, fields[7])
     }
 
     @Test fun `parameter sets and keyframes are recognised in an access unit`() {

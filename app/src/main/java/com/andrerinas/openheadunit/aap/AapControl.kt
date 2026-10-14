@@ -93,6 +93,7 @@ internal class AapControlMedia(
         aapTransport.send(msg)
 
         if (channel == Channel.ID_VID) {
+            com.andrerinas.openheadunit.cluster.ClusterMapStream.onMainVideoSetup()
             aapTransport.gainVideoFocus()
         }
 
