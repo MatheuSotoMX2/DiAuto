@@ -28,6 +28,8 @@ internal object ClusterMapStream {
     @Volatile var guidance: BydGuidance? = null
 
     private val lock = Any()
+    // Protocol minor the current connection runs at. The cluster display needs 1.6 or newer.
+    @Volatile private var protocolMinor = 2
     // A phone that refuses a cluster description closes the session before setting up the main
     // picture. The next connection then tries the next description of the ladder; after the last
     // one the cluster is not offered again in this run, so the phone always gets back in.
@@ -64,6 +66,10 @@ internal object ClusterMapStream {
             AppLog.w("ClusterMap: not offering the cluster display: the phone refused every description of it. Restart DiAuto to try again.")
             return null
         }
+        if (protocolMinor < MIN_PROTOCOL_MINOR) {
+            AppLog.i("ClusterMap: not offering the cluster display on a protocol 1.$protocolMinor connection; it needs 1.$MIN_PROTOCOL_MINOR or newer.")
+            return null
+        }
         val theme = ClusterLayout.theme(settings.bydClusterLayout)
         val display = ClusterLayout.findDisplay(context, theme) ?: run {
             AppLog.i("ClusterMap: enabled, but no cluster projection display among ${ClusterLayout.describeDisplays(context)}")
@@ -77,6 +83,15 @@ internal object ClusterMapStream {
         AppLog.i("ClusterMap: offering a cluster display (${profile.name}, description ${ladderIndex + 1} of " +
             "${ClusterStreamProfile.LADDER.size}) for ${display.name} ${size.x}x${size.y} theme=$theme plan=$plan")
         profile
+    }
+
+    /** Whether the next connection should ask for the protocol the cluster display needs. */
+    fun wantsCluster(context: Context, settings: Settings): Boolean =
+        available() && settings.bydClusterMapEnabled && !refusedThisRun &&
+            ClusterLayout.findDisplay(context, ClusterLayout.theme(settings.bydClusterLayout)) != null
+
+    fun onProtocolNegotiated(minor: Int) {
+        protocolMinor = minor
     }
 
     /** The phone set up the main picture, so it accepted the displays it was offered. */
@@ -180,7 +195,13 @@ internal object ClusterMapStream {
             "theme=$theme measuredFirmware=${ClusterLayout.supported()} " +
             "display=${if (available()) ClusterLayout.findDisplay(context, theme)?.name ?: "none" else "unsupported"} " +
             "session=${current?.let { "${it.displayName} ${it.profile.name}" } ?: "none"} " +
-            "picture=$streamActive accepted=${acceptedProfile ?: "none"} " +
+            "picture=$streamActive protocol=1.$protocolMinor accepted=${acceptedProfile ?: "none"} " +
             "refused=${ClusterStreamProfile.LADDER.take(ladderIndex).joinToString("/") { it.name }.ifEmpty { "none" }}"
     }
+
+    /**
+     * A OnePlus 15 restarted its projection about a second after setup whenever a 1.2 connection
+     * offered the cluster display, and kept a 1.7 one; web-auto declares its displays at 1.6.
+     */
+    private const val MIN_PROTOCOL_MINOR = 6
 }

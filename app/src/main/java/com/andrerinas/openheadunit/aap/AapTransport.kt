@@ -607,7 +607,11 @@ class AapTransport(
             // The phone sends the modern cluster messages (NavigationState / CurrentPosition: steps,
             // destination distance and ETA) only from protocol 1.6; at 1.2 it sends the legacy
             // NextTurn events. Ask for 1.7; a phone that rejects it is asked again for 1.2 below.
-            var protocolMinor = REQUESTED_PROTOCOL_MINOR
+            // Only when this session may offer the dashboard map: a OnePlus 15 restarted its
+            // projection a second after setup when it saw a cluster display on a 1.2 connection,
+            // and at 1.2 the HUD keeps the legacy turn events it was validated on.
+            var protocolMinor = if (com.andrerinas.openheadunit.cluster.ClusterMapStream.wantsCluster(context, settings))
+                REQUESTED_PROTOCOL_MINOR else 2
             var version = if (protocolMinor == 2) Messages.versionRequest else Messages.versionRequest(protocolMinor)
             AppLog.i("Handshake: requesting protocol 1.$protocolMinor")
             var ret = -1
@@ -618,6 +622,8 @@ class AapTransport(
             var peerSentBytes = false
             var transportError = false
             var retryAtFallback = false
+            // What the session runs at; without the phone's status bytes, assume the 1.2 baseline.
+            var negotiatedMinor = 2
             // Outer deadline prevents the loop from running for minutes on an unresponsive device.
             // Each send+recv pair uses 2 s per operation; 3 attempts × 4 s ≈ 12 s worst-case,
             // capped here at HANDSHAKE_TIMEOUT_MS so a stuck device fails fast.
@@ -669,6 +675,7 @@ class AapTransport(
                                 retryAtFallback = true
                                 break
                             }
+                            if (status == 0) negotiatedMinor = minOf(protocolMinor, minor)
                         }
                         received = true
                         break
@@ -680,7 +687,10 @@ class AapTransport(
                              "(ch=$ch, type=0x${type.toString(16)}, len=$ret). " +
                              "Waiting for VERSION_RESPONSE.")
                 }
-                if (received) break
+                if (received) {
+                    com.andrerinas.openheadunit.cluster.ClusterMapStream.onProtocolNegotiated(negotiatedMinor)
+                    break
+                }
                 if (retryAtFallback) {
                     retryAtFallback = false
                     attempt = 0 // The 1.2 request gets its own attempts; this happens at most once.

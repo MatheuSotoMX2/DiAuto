@@ -103,6 +103,7 @@ class AapNavigation(
             NavigationStatus.MsgType.INSTRUMENT_CLUSTER_NAVIGATION_STATE_VALUE -> {
                 try {
                     val state = message.parse(NavigationStatus.NavigationState.newBuilder()).build()
+                    debugDump("NavigationState", state)
                     snapshot.navigationState = AapNavigationHelper.TimedMessage(state, helper.nowElapsedRealtimeMs())
                     val firstStepRoad = state.stepsList.firstOrNull()
                         ?.takeIf { it.hasRoad() && it.road.hasName() }
@@ -122,6 +123,7 @@ class AapNavigation(
             NavigationStatus.MsgType.INSTRUMENT_CLUSTER_NAVIGATION_CURRENT_POSITION_VALUE -> {
                 try {
                     val position = message.parse(NavigationStatus.NavigationCurrentPosition.newBuilder()).build()
+                    debugDump("NavigationCurrentPosition", position)
                     snapshot.currentPosition = AapNavigationHelper.TimedMessage(position, helper.nowElapsedRealtimeMs())
                     val road = position
                         .takeIf { it.hasCurrentRoad() && it.currentRoad.hasName() }
@@ -144,6 +146,21 @@ class AapNavigation(
                 false
             }
         }
+    }
+
+    private val lastDumpMs = mutableMapOf<String, Long>()
+
+    /**
+     * Debug builds only: the whole message, unknown fields included, at most every 10 s per type.
+     * At protocol 1.7 the HUD mapper found no maneuver type or step distance in these messages
+     * during an active Google Maps route; this shows what the phone actually sends.
+     */
+    private fun debugDump(name: String, message: com.google.protobuf.Message) {
+        if (!com.andrerinas.openheadunit.BuildConfig.DEBUG) return
+        val now = helper.nowElapsedRealtimeMs()
+        if (now - (lastDumpMs[name] ?: 0L) < 10_000L) return
+        lastDumpMs[name] = now
+        AppLog.i("Nav dump $name: ${com.google.protobuf.TextFormat.shortDebugString(message)}")
     }
 
     private fun clearAccumulatedData() {
