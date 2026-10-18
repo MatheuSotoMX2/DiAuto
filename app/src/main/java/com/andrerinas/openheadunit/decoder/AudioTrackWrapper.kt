@@ -385,6 +385,10 @@ class AudioTrackWrapper(
                     AudioAttributes.USAGE_VOICE_COMMUNICATION,
                     AudioAttributes.CONTENT_TYPE_SPEECH
                 )
+                AudioManager.STREAM_ALARM -> Pair(
+                    AudioAttributes.USAGE_ALARM,
+                    AudioAttributes.CONTENT_TYPE_MUSIC
+                )
                 else -> Pair(
                     AudioAttributes.USAGE_MEDIA,
                     AudioAttributes.CONTENT_TYPE_MUSIC

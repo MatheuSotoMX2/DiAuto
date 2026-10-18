@@ -1154,7 +1154,7 @@ class AapService : Service(), UsbReceiver.Listener {
                     commManager.sendKey(android.view.KeyEvent.KEYCODE_MEDIA_STOP, false, null, "transport-control")
                 }
             })
-            setPlaybackToLocal(android.media.AudioManager.STREAM_MUSIC)
+            setPlaybackToLocal(com.andrerinas.openheadunit.aap.protocol.AudioConfigs.MEDIA_STREAM)
         }
         applyPlaceholderMediaMetadata()
     }

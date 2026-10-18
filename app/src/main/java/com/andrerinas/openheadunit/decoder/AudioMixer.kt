@@ -118,7 +118,7 @@ class AudioMixer(
         try {
             audioTrack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val attributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(if (stream == AudioManager.STREAM_ALARM) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build()
 
